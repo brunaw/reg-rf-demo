@@ -15,6 +15,7 @@ folds <- rsample::vfold_cv(gravier, v = 5) %>%
   dplyr::mutate(train =  map(splits, training),
                 test  = map(splits, testing))
 
+# Checking class proportions --- 
 folds %>% 
   pull(train) %>%
   .[[1]] %>% 
@@ -85,7 +86,6 @@ folds_imp %>%
   dplyr::slice(1:3) %>% 
   saveRDS(file = "results/folds_imp_head.rds")
 
-
 # Running models with all the new importance values ------
 run_all_models <-  folds_imp %>%   
   dplyr::select(id, model, train, test,  imp_rf, imp_mi, mtry, lambda_0_f, gamma_f) %>% 
@@ -94,7 +94,7 @@ run_all_models <-  folds_imp %>%
   dplyr::mutate(fit_penalized_rf = 
                   purrr::pmap(list(train, importance, mtry), modelling)) 
 
-dim(run_all_models) # 120
+dim(run_all_models)
 saveRDS(run_all_models, file = "results/run_all_models.rds")
 
 # Evaluating all models ------
@@ -133,7 +133,6 @@ results %>%
                  desc(accuracy), n_var) %>% 
   saveRDS("results/results_table.rds")
 
-names(results)
 # Plots ----------------------------
 p1 <- results %>% 
   group_by(mtry, type, gamma_f) %>%
@@ -229,6 +228,7 @@ final_results <- folds_20$splits %>% map(~{
 
 saveRDS(final_results, "results/final_results.rds")
 
+# Final accuracies and importance values 
 data.frame(accuracy_test = final_results %>% map_dbl("accuracy_test"), 
            accuracy = final_results %>% map_dbl("accuracy")) %>% 
   gather(type, value) %>% 
@@ -253,8 +253,4 @@ final_results %>%
   xlab("Variables") +
   theme_bw(18) +
   coord_flip() 
-
-# [1] 0.845
-# [1] 0.8808997
-
 # ----------------------------------------------------------------------
