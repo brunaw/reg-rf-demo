@@ -1,0 +1,49 @@
+@import url(https://fonts.googleapis.com/css?family=Lato);
+@import url(https://fonts.googleapis.com/css?family=Muli);
+@import url('https://fonts.googleapis.com/css?family=Inconsolata');
+@import url('https://fonts.googleapis.com/css?family=Cormorant+Upright');
+
+body {
+  font-family: 'Lato', 'Palatino Linotype', 'Book Antiqua', Palatino, 'Microsoft YaHei', 'Songti SC', serif;
+}
+
+h1, h2, h3 {
+  font-family: 'Muli';
+}
+
+body {
+  font-size: 25px;
+}
+
+
+.inverse h1 {
+  font-family: 'Muli';
+  font-weight: 800;
+  font-size: 3.5em; 
+}
+
+.inverse h2 {
+  font-family: 'Muli';
+  font-weight: 600;
+  font-size: 3.5em; 
+}
+
+
+.remark-code, .remark-inline-code {
+  font-family: 'Inconsolata', 'Lucida Console', Monaco, monospace;
+}
+
+.fancy{
+  font-family: 'Cormorant Upright', serif;
+  font-weight: 800;
+  font-size: 1.5em; 
+}
+
+/* for mermaid */
+
+.DiagrammeR g .label { 
+  font-family: 'Lato'; 
+  font-size: 34px; 
+  color: rgb(51, 51, 51);
+}
+

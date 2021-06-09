@@ -1,0 +1,755 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Feature Selection via Gain Penalization in Random Forests</title>
+    <meta charset="utf-8">
+    <meta name="author" content="Bruna Wundervald" />
+    <link href="libs/remark-css/default.css" rel="stylesheet" />
+    <link href="libs/panelset/panelset.css" rel="stylesheet" />
+    <script src="libs/panelset/panelset.js"></script>
+    <script src="libs/clipboard/clipboard.min.js"></script>
+    <link href="libs/shareon/shareon.min.css" rel="stylesheet" />
+    <script src="libs/shareon/shareon.min.js"></script>
+    <link href="libs/xaringanExtra-shareagain/shareagain.css" rel="stylesheet" />
+    <script src="libs/xaringanExtra-shareagain/shareagain.js"></script>
+    <script src="libs/kePrint/kePrint.js"></script>
+    <link href="libs/lightable/lightable.css" rel="stylesheet" />
+    <script defer src="https://use.fontawesome.com/releases/v5.6.1/js/all.js" integrity="sha384-R5JkiUweZpJjELPWqttAYmYM1P3SNEJRM6ecTQF05pFFtxmCO+Y1CiUhvuDzgSVZ" crossorigin="anonymous"></script>
+    <link rel="stylesheet" href="css/penguin.css" type="text/css" />
+    <link rel="stylesheet" href="css/fonts.css" type="text/css" />
+  </head>
+  <body>
+    <textarea id="source">
+
+
+
+
+
+layout: true
+  
+&lt;div class="my-footer"&gt;&lt;span&gt;https://github.com/brunaw/reg-rf-demo&lt;/span&gt;&lt;/div&gt;
+
+&lt;!-- this adds the link footer to all slides, depends on my-footer class in css--&gt;
+
+---
+name: bookdown-title
+
+&lt;br&gt;
+&lt;br&gt;
+
+.pull-left[
+&lt;div class="column"&gt;
+&lt;img src="img/MU_logo.png" width="350"&gt;
+&lt;/div&gt;
+]
+
+
+&lt;br&gt;
+&lt;br&gt;
+&lt;br&gt;
+&lt;br&gt;
+
+&lt;br&gt;
+&lt;br&gt;
+&lt;br&gt;
+&lt;br&gt;
+&lt;br&gt;
+
+### .fancy[Feature Selection via Gain Penalization in Random Forests]
+
+.large[Bruna Wundervald | Maynooth University | V SER, June 2021]
+
+
+
+---
+class: inverse, middle
+
+### .fancy[Summary]
+
+  - Introduction
+    - Random Forests
+    - Gain Penalization
+    - Feature Selection
+  
+  - Implementation: `R` code
+    - Data
+    - First models
+    - Feature selection
+    - Final model
+
+---
+class: inverse, middle, center
+
+### .fancy[Introduction]
+
+  
+---
+# Introduction
+
+- Oftentimes, we want to estimate machine learning models that use
+just a few of the available predictors 
+
+- Random Forests are a form of tree-based ensembles
+
+- Grows many trees in resamples of the data, averaging the results
+at the end (bagged ensemble) (Breiman (1996)): 
+
+
+`$$\hat f(\mathbf{x}) = \sum_{n = 1}^{N_{tree}} \frac{1}{N_{tree}} \hat f_n(\mathbf{x}),$$`
+
+where `\(\hat f_n\)` corresponds to the `\(n\)`-th tree
+
+## Issues
+
+- Use all or most of the features that are feed to them
+ 
+- Struggle a lot to detect highly correlated features (Louppe (2014))
+
+
+
+---
+
+# Gain penalization
+
+- A tree-gain weighting method (Deng and Runger (2012))
+- When determining the next child node to be added to a decision tree, 
+the gain (or the error reduction) of each feature 
+is multiplied by a penalization parameter:  
+
+`$$\begin{equation} \text{Gain}_{R}(\mathbf{X}_{i}, t) = 
+\begin{cases} \lambda \Delta(i, t), \thinspace  i \notin \mathbb{U} \text{ and} \\ \Delta(i, t), \thinspace  i \in \mathbb{U},  \end{cases}
+\label{eq:grrf}\end{equation}$$`
+
+where `\(\mathbb{U}\)` is the set of indices of the features previously 
+used in the tree, `\(\mathbf{X}_{i}\)` is the candidate feature,
+`\(t\)` is the candidate splitting point and `\(\lambda \in (0, 1]\)`  
+
+
+&gt; A new split will only be made if, after the penalization,
+the gain of adding this node is still higher than having 
+no new child node in the tree
+
+---
+
+# Generalizing gain penalization
+
+
+- In (Wundervald, Parnell, and Domijan (2020)), we proposed 
+a generalization to the way the penalization coefficients
+are calculated, such that we can have full control over it. 
+
+
+- Our `\(\lambda_i\)` is written as 
+`$$\begin{equation}
+\lambda_i = (1 - \gamma) \lambda_0 + \gamma g(\mathbf{x}_i), \label{eq:generalization} \end{equation}$$`
+
+where `\(\lambda_0 \in [0, 1)\)` is interpreted as the 
+baseline penalization,  `\(g(\mathbf{x}_i)\)` 
+is a function of the  `\(i\)`-th feature, 
+and `\(\gamma \in [0, 1)\)` is their mixture parameter, 
+with `\(\lambda_i \in [0, 1)\)`. 
+
+
+- `\(g(\mathbf{x}_i)\)`  should represent relevant information about the 
+features, based on some characteristic of interest
+
+- Inspiration on the use of priors made in Bayesian methods
+
+- Global-local penalization
+
+---
+--- 
+# Feature Selection
+
+The full feature selection procedure happens in 3 main steps:
+
+  1. Running a bunch of penalized random forests models
+  with different hyperparameters and record their accuracies and final set of features
+  
+  2. For each training dataset, select the top-n (for this post we use n = 3) fitted models in terms of the accuracies, and run a "new" random
+  forest for each of the feature sets used by them. This is done using all
+  of the training sets so we can evaluate how these features perform in slightly different scenarios
+  
+  3. Finally, get the top-m set of models (here m = 30) from these
+  new ones, check which features were the most used between them 
+  and run a final random forest model with this feature set.
+  
+  - Here we select only the 15 most used features from the top 30 models
+
+---
+
+class: inverse, middle, center
+
+### .fancy[Implementation]
+
+---
+# Data 
+
+- `gravier` dataset 
+  (Gravier, Pierron, Vincent-Salomon, Gruel, Raynal, Savignoni, De Rycke, Pierga, Lucchesi, Reyal, and others (2010))
+- Goal: to predict whether 168 breast cancer patients had a diagnosis
+labelled "poor" (~66%) or "good" (~33%), with 2905 predictors available
+- `tidyverse` + `tidymodels`
+  
+
+.panelset[
+.panel[.panel-name[Data]
+
+
+```r
+library(tidyverse)
+library(tidymodels)
+library(infotheo) # For the mutual information function
+set.seed(2021)
+
+# Loading data and creating a 5-fold CV object
+data('gravier', package = 'datamicroarray')
+
+gravier &lt;- data.frame(class = gravier$y, gravier$x)
+folds &lt;- rsample::vfold_cv(gravier, v = 5) %&gt;% 
+  dplyr::mutate(train =  map(splits, training),
+                test  = map(splits, testing))
+```
+]]
+
+
+---
+# Modelling functions
+
+&gt; `c++` implementantion at https://github.com/imbs-hl/ranger
+
+.panelset[
+.panel[.panel-name[Modelling]
+
+
+```r
+# A function that runs the penalized random forests models 
+modelling &lt;- function(train, reg_factor = 1, mtry = 1){
+  rf_mod &lt;- 
+    rand_forest(trees = 500, mtry = (mtry * ncol(train)) - 1) %&gt;% 
+    set_engine("ranger", importance = "impurity", 
+               regularization.factor = reg_factor) %&gt;% 
+    set_mode("classification") %&gt;% 
+    parsnip::fit(class ~ ., data = train)
+  return(rf_mod)
+}
+```
+]
+
+.panel[.panel-name[Penalization]
+
+
+```r
+# A function that receives the mixing parameters
+# and calculates lambda_i with the chose g(x_i)
+penalization &lt;- function(gamma, lambda_0, data = NULL, imps = NULL, type = "rf"){
+  if(type == "rf"){
+    # Calculating the normalized importance values 
+    imps &lt;- imps/max(imps)
+    imp_mixing &lt;- (1 - gamma) * lambda_0 + imps * gamma 
+    return(imp_mixing)
+  } else if(type == "MI"){
+    mi &lt;- function(data, var) mutinformation(c(data$class), data %&gt;% pull(var))
+    # Calculating the normalized mutual information values
+    disc_data  &lt;- infotheo::discretize(data) 
+    disc_data$class &lt;- as.factor(data$class)
+    names_data &lt;- names(data)[-1]
+    mi_vars &lt;- names_data  %&gt;% map_dbl(~{mi(data = disc_data, var = .x) })
+    mi_mixing &lt;- (1 - gamma) * lambda_0 + gamma * (mi_vars/max(mi_vars))
+    return(mi_mixing)  
+  }}
+```
+]
+
+.panel[.panel-name[Hyperparameters]
+
+
+```r
+# Setting all hyperparameters ---
+mtry &lt;-  tibble(mtry = c(0.20, 0.45, 0.85))  
+gamma_f  &lt;-  c(0.3, 0.5, 0.8)
+lambda_0_f &lt;- c(0.35, 0.75)
+
+parameters &lt;- mtry %&gt;% tidyr::crossing(lambda_0_f, gamma_f)
+# Adds gamma_f and lambda_0_f and run the functions with them ------
+folds_imp &lt;- folds %&gt;% 
+  dplyr::mutate(
+    # Run the standard random forest model for the 5 folds
+    model = purrr::map(train, modelling), 
+    importances_std = purrr::map(model, ~{.x$fit$variable.importance}))  %&gt;%
+  tidyr::expand_grid(parameters) %&gt;% 
+  dplyr::mutate(imp_rf = purrr::pmap(
+    list(gamma_f, lambda_0_f, train, importances_std), type = "rf", penalization), 
+    imp_mi = purrr::pmap(
+      list(gamma_f, lambda_0_f, train, importances_std), type = "MI", penalization)) 
+```
+]
+
+
+]
+
+---
+class: middle
+
+## Looking at the accuracy of the standard random forest 
+
+&lt;table class="table table-condensed table-hover" style="width: auto !important; margin-left: auto; margin-right: auto;"&gt;
+ &lt;thead&gt;
+  &lt;tr&gt;
+   &lt;th style="text-align:left;"&gt; id &lt;/th&gt;
+   &lt;th style="text-align:right;"&gt; n_var &lt;/th&gt;
+   &lt;th style="text-align:right;"&gt; accuracy_test_std &lt;/th&gt;
+   &lt;th style="text-align:right;"&gt; accuracy_std &lt;/th&gt;
+  &lt;/tr&gt;
+ &lt;/thead&gt;
+&lt;tbody&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; Fold1 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 1206 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.735 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.8481872 &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; Fold2 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 1380 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.765 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.8235503 &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; Fold3 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 1379 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.765 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.8246055 &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; Fold4 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 1377 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.788 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.8260160 &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; Fold5 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 1198 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.667 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.8548713 &lt;/td&gt;
+  &lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
+
+
+---
+# Running models
+
+.panelset[
+.panel[.panel-name[All models]
+
+
+```r
+run_all_models &lt;-  folds_imp %&gt;%   
+  dplyr::select(id, model, train, test,  imp_rf, imp_mi, mtry, lambda_0_f, gamma_f) %&gt;% 
+  tidyr::gather(type, importance, -train, -test, -mtry,-id, -model, -lambda_0_f, -gamma_f) %&gt;% 
+  dplyr::mutate(fit_penalized_rf = purrr::pmap(list(train, importance, mtry), modelling)) 
+```
+]
+
+.panel[.panel-name[Metrics]
+
+
+```r
+results &lt;- run_all_models %&gt;% 
+  dplyr::mutate(
+    model_importance = purrr::map(fit_penalized_rf, ~{.x$fit$variable.importance}),
+    n_var = purrr::map_dbl(model_importance, n_vars),
+    accuracy = 1 - purrr::map_dbl(fit_penalized_rf, ~{ .x$fit$prediction.error}),
+    accuracy_test = purrr::map2_dbl(
+      .x = fit_penalized_rf, .y = test, ~{ acc_test(.x, .y)})) 
+```
+]
+
+.panel[.panel-name[First Results]
+
+&lt;table class="table table-condensed table-hover" style="width: auto !important; margin-left: auto; margin-right: auto;"&gt;
+ &lt;thead&gt;
+  &lt;tr&gt;
+   &lt;th style="text-align:left;"&gt; id &lt;/th&gt;
+   &lt;th style="text-align:right;"&gt; mtry &lt;/th&gt;
+   &lt;th style="text-align:right;"&gt; lambda_0_f &lt;/th&gt;
+   &lt;th style="text-align:right;"&gt; gamma_f &lt;/th&gt;
+   &lt;th style="text-align:left;"&gt; type &lt;/th&gt;
+   &lt;th style="text-align:right;"&gt; n_var &lt;/th&gt;
+   &lt;th style="text-align:right;"&gt; accuracy &lt;/th&gt;
+   &lt;th style="text-align:right;"&gt; accuracy_test &lt;/th&gt;
+  &lt;/tr&gt;
+ &lt;/thead&gt;
+&lt;tbody&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; Fold1 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.85 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.75 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.5 &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; imp_rf &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 5 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.8979667 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.824 &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; Fold1 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.20 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.75 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.3 &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; imp_rf &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 32 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.8786310 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.794 &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; Fold1 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.45 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.75 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.8 &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; imp_rf &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 12 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.9001406 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.765 &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; Fold1 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.45 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.35 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.3 &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; imp_rf &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 11 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.8998857 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.765 &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; Fold1 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.45 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.35 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.5 &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; imp_rf &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 13 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.8995989 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.765 &lt;/td&gt;
+  &lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
+
+
+]]
+
+---
+&lt;div class="figure" style="text-align: center"&gt;
+&lt;img src="presentation_files/figure-html/unnamed-chunk-10-1.png" alt="Test accuracies for each combination of mtry, type of `\(g(\mathbf{x}_i)\)`, and `\(\gamma\)`."  /&gt;
+&lt;p class="caption"&gt;Test accuracies for each combination of mtry, type of `\(g(\mathbf{x}_i)\)`, and `\(\gamma\)`.&lt;/p&gt;
+&lt;/div&gt;
+
+---
+
+
+&lt;div class="figure" style="text-align: center"&gt;
+&lt;img src="presentation_files/figure-html/unnamed-chunk-11-1.png" alt="Final number of variables used for each combination of mtry, type of `\(g(\mathbf{x}_i)\)`, and `\(\gamma\)`"  /&gt;
+&lt;p class="caption"&gt;Final number of variables used for each combination of mtry, type of `\(g(\mathbf{x}_i)\)`, and `\(\gamma\)`&lt;/p&gt;
+&lt;/div&gt;
+
+
+---
+
+--- 
+
+# Feature selection
+
+
+
+.panelset[
+.panel[.panel-name[Selecting best models &amp; running again]
+
+
+```r
+best_models &lt;- results %&gt;% 
+  arrange(desc(accuracy_test), desc(accuracy), n_var) %&gt;% 
+  group_by(id) %&gt;% 
+  slice(1:3) %&gt;% 
+  ungroup() %&gt;% 
+  mutate(new_formula = map(model_importance, get_formula))
+
+# Re-evaluating selected variables -----------------
+reev &lt;- tibble(forms = best_models$new_formula) %&gt;% 
+  tidyr::expand_grid(folds) %&gt;% 
+  dplyr::mutate(reev_models = purrr::map2(train, forms, modelling_reev))
+
+results_reev &lt;- reev %&gt;% 
+  dplyr::mutate(feat_importance = purrr::map(reev_models, ~{.x$fit$variable.importance}),
+                n_var = purrr::map_dbl(feat_importance, n_vars),
+                accuracy = 1 - purrr::map_dbl(reev_models, ~{ .x$fit$prediction.error}),
+                accuracy_test = purrr::map2_dbl(.x = reev_models, .y = test, ~{ acc_test(.x, test = .y)})) 
+```
+]
+
+.panel[.panel-name[Results]
+
+&lt;table class="table table-condensed table-hover" style="width: auto !important; margin-left: auto; margin-right: auto;"&gt;
+ &lt;thead&gt;
+  &lt;tr&gt;
+   &lt;th style="text-align:left;"&gt; id &lt;/th&gt;
+   &lt;th style="text-align:right;"&gt; n_var &lt;/th&gt;
+   &lt;th style="text-align:right;"&gt; accuracy &lt;/th&gt;
+   &lt;th style="text-align:right;"&gt; accuracy_test &lt;/th&gt;
+  &lt;/tr&gt;
+ &lt;/thead&gt;
+&lt;tbody&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; Fold1 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 31 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.8822612 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.824 &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; Fold1 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 33 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.8767357 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.824 &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; Fold1 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 31 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.8853979 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.794 &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; Fold1 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 13 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.8638945 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.794 &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; Fold1 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 5 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.8918104 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.765 &lt;/td&gt;
+  &lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
+]
+
+
+]
+
+
+---
+
+# Final models 
+
+
+
+.panelset[
+.panel[.panel-name[Final predictors]
+
+
+```r
+selected_vars &lt;- results_reev %&gt;% 
+  arrange(desc(accuracy_test), desc(accuracy), n_var) %&gt;% 
+  slice(1:30) %&gt;% 
+  mutate(ind = 1:n(), vars = map(feat_importance, get_vars)) %&gt;% 
+  dplyr::select(ind, vars) %&gt;% 
+  unnest() %&gt;% 
+  group_by(vars) %&gt;% 
+  summarise(count = n()) %&gt;% 
+  arrange(desc(count))
+
+# Select the final 15 features
+final_vars &lt;- selected_vars %&gt;% slice(1:15) %&gt;% pull(vars)
+# Create the final formula 
+final_form &lt;- paste("class ~ ", paste0(final_vars, collapse = ' + ')) %&gt;%
+  as.formula()
+```
+]
+
+.panel[.panel-name[Final Model]
+
+
+```r
+# Create the 20 new training and test sets
+set.seed(2021)
+folds_20 &lt;- rsample::vfold_cv(gravier, v = 20) %&gt;% 
+  dplyr::mutate(train =  map(splits, training), test  = map(splits, testing))
+
+# Run the final model for the new train-test sets
+final_results &lt;- folds_20$splits %&gt;% map(~{
+  train &lt;-  training(.x)
+  test &lt;-  testing(.x)
+  
+  rf &lt;- rand_forest(trees = 500, mtry = 7) %&gt;%
+    set_engine("ranger", importance = "impurity") %&gt;% 
+    set_mode("classification") %&gt;% 
+    parsnip::fit(final_form, data = train)
+  
+  accuracy_test &lt;- acc_test(rf, test = test)
+  list(accuracy_test = accuracy_test, 
+       accuracy = 1 - rf$fit$prediction.error, 
+       imp = rf$fit$variable.importance)
+})
+```
+]
+
+
+.panel[.panel-name[Results]
+
+&lt;table class="table table-condensed table-hover" style="width: auto !important; margin-left: auto; margin-right: auto;"&gt;
+ &lt;thead&gt;
+  &lt;tr&gt;
+   &lt;th style="text-align:left;"&gt; type &lt;/th&gt;
+   &lt;th style="text-align:right;"&gt; mean &lt;/th&gt;
+   &lt;th style="text-align:right;"&gt; median &lt;/th&gt;
+  &lt;/tr&gt;
+ &lt;/thead&gt;
+&lt;tbody&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; accuracy &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.8974934 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.8971951 &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; accuracy_test &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.8681000 &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.8820000 &lt;/td&gt;
+  &lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
+]]
+
+---
+class: middle
+
+&lt;div class="figure" style="text-align: center"&gt;
+&lt;img src="presentation_files/figure-html/unnamed-chunk-17-1.png" alt="Average importance values for the final selected variables"  /&gt;
+&lt;p class="caption"&gt;Average importance values for the final selected variables&lt;/p&gt;
+&lt;/div&gt;
+
+---
+
+class: inverse, middle, center
+
+### .fancy[Conclusions]
+
+---
+
+# Conclusions
+
+- Our gain penalization method can be very useful to select 
+features for random forests 
+
+- In the example, 
+the final test accuracy (average) is higher than what
+was seen in the previous plots, but now using only 15 features
+
+- These results are better than what was previously observed in the
+literature for this data  (López, Maldonado, and Carrasco (2018); Takada, Suzuki, and Fujisawa (2018); Huynh, Do, and others (2020))
+
+
+
+Links:
+  - [To paper](https://ieeexplore.ieee.org/document/9229097)
+  - [To full code](https://github.com/brunaw/reg-rf-demo/tree/master/code)
+  - [To presentation repository](https://github.com/brunaw/reg-rf-demo/tree/master/presentation)
+  
+
+---
+ 
+# References
+
+
+&lt;p&gt;&lt;cite&gt;&lt;a id='bib-Breiman1996'&gt;&lt;/a&gt;&lt;a href="#cite-Breiman1996"&gt;Breiman, L.&lt;/a&gt;
+(1996).
+&amp;ldquo;Bagging Predictors&amp;rdquo;.
+In: &lt;em&gt;Machine Learning&lt;/em&gt; 24.2, pp. 123&amp;ndash;140.
+ISSN: 1573-0565.
+DOI: &lt;a href="https://doi.org/10.1023/A:1018054314350"&gt;10.1023/A:1018054314350&lt;/a&gt;.
+URL: &lt;a href="https://doi.org/10.1023/A:1018054314350"&gt;https://doi.org/10.1023/A:1018054314350&lt;/a&gt;.&lt;/cite&gt;&lt;/p&gt;
+
+&lt;p&gt;&lt;cite&gt;&lt;a id='bib-rrf_paper'&gt;&lt;/a&gt;&lt;a href="#cite-rrf_paper"&gt;Deng, H. and G. Runger&lt;/a&gt;
+(2012).
+&amp;ldquo;Feature selection via regularized trees&amp;rdquo;.
+In: 
+&lt;em&gt;The 2012 International Joint Conference on Neural Networks (IJCNN)&lt;/em&gt;.
+IEEE.
+, pp. 1&amp;ndash;8.&lt;/cite&gt;&lt;/p&gt;
+
+&lt;p&gt;&lt;cite&gt;&lt;a id='bib-gravier2010prognostic'&gt;&lt;/a&gt;&lt;a href="#cite-gravier2010prognostic"&gt;Gravier, E, G. Pierron, A. Vincent-Salomon, et al.&lt;/a&gt;
+(2010).
+&amp;ldquo;A prognostic DNA signature for T1T2 node-negative breast cancer patients&amp;rdquo;.
+In: &lt;em&gt;Genes, chromosomes and cancer&lt;/em&gt; 49.12, pp. 1125&amp;ndash;1134.&lt;/cite&gt;&lt;/p&gt;
+
+&lt;p&gt;&lt;cite&gt;&lt;a id='bib-phdthesisRF'&gt;&lt;/a&gt;&lt;a href="#cite-phdthesisRF"&gt;Louppe, G.&lt;/a&gt;
+(2014).
+&amp;ldquo;Understanding Random Forests: From Theory to Practice&amp;rdquo;.
+DOI: &lt;a href="https://doi.org/10.13140/2.1.1570.5928"&gt;10.13140/2.1.1570.5928&lt;/a&gt;.&lt;/cite&gt;&lt;/p&gt;
+
+&lt;p&gt;&lt;cite&gt;&lt;a id='bib-wundervald2020generalizing'&gt;&lt;/a&gt;&lt;a href="#cite-wundervald2020generalizing"&gt;Wundervald, B, A. C. Parnell, and K. Domijan&lt;/a&gt;
+(2020).
+&amp;ldquo;Generalizing Gain Penalization for Feature Selection in Tree-Based Models&amp;rdquo;.
+In: &lt;em&gt;IEEE Access&lt;/em&gt; 8, pp. 190231&amp;ndash;190239.&lt;/cite&gt;&lt;/p&gt;
+
+
+
+---
+
+
+class: middle, center, inverse
+
+&lt;font size="80"&gt;Thanks! &lt;/font&gt;
+
+&lt;b&gt; 
+&lt;font size="80"&gt;http://brunaw.com/ &lt;/font&gt;
+
+&lt;p&gt;
+    </textarea>
+<script src="https://remarkjs.com/downloads/remark-latest.min.js"></script>
+<script src="https://platform.twitter.com/widgets.js"></script>
+<script>var slideshow = remark.create({
+"highlightStyle": "solarized-light",
+"highlightLines": true,
+"countIncrementalSlides": false,
+"ratio": "16:9"
+});
+if (window.HTMLWidgets) slideshow.on('afterShowSlide', function (slide) {
+  window.dispatchEvent(new Event('resize'));
+});
+(function() {
+  var d = document, s = d.createElement("style"), r = d.querySelector(".remark-slide-scaler");
+  if (!r) return;
+  s.type = "text/css"; s.innerHTML = "@page {size: " + r.style.width + " " + r.style.height +"; }";
+  d.head.appendChild(s);
+})();</script>
+
+<script>
+(function() {
+  var i, text, code, codes = document.getElementsByTagName('code');
+  for (i = 0; i < codes.length;) {
+    code = codes[i];
+    if (code.parentNode.tagName !== 'PRE' && code.childElementCount === 0) {
+      text = code.textContent;
+      if (/^\\\((.|\s)+\\\)$/.test(text) || /^\\\[(.|\s)+\\\]$/.test(text) ||
+          /^\$\$(.|\s)+\$\$$/.test(text) ||
+          /^\\begin\{([^}]+)\}(.|\s)+\\end\{[^}]+\}$/.test(text)) {
+        code.outerHTML = code.innerHTML;  // remove <code></code>
+        continue;
+      }
+    }
+    i++;
+  }
+})();
+</script>
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+(function () {
+  var script = document.createElement('script');
+  script.type = 'text/javascript';
+  script.src  = 'https://mathjax.rstudio.com/latest/MathJax.js?config=TeX-MML-AM_CHTML';
+  if (location.protocol !== 'file:' && /^https?:/.test(script.src))
+    script.src  = script.src.replace(/^https?:/, '');
+  document.getElementsByTagName('head')[0].appendChild(script);
+})();
+</script>
+  </body>
+</html>

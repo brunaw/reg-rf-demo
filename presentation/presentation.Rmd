@@ -1,0 +1,605 @@
+---
+title: "Feature Selection via Gain Penalization in Random Forests"
+author: "Bruna Wundervald"
+output:
+  xaringan::moon_reader:
+    css: ["default", "css/penguin.css", "css/fonts.css"]
+    lib_dir: libs
+    nature:
+      highlightStyle: solarized-light
+      highlightLines: true
+      countIncrementalSlides: false
+      ratio: "16:9"
+      beforeInit: "https://platform.twitter.com/widgets.js"
+    seal: false 
+    includes:
+      in_header: header.html
+editor_options: 
+  chunk_output_type: console
+header-includes:
+  - \usepackage[fleqn]{amsmath}
+  - \usepackage{float}
+  - \usepackage{graphicx}
+---
+
+
+```{r setup, include=FALSE}
+options(htmltools.dir.version = FALSE)
+library(knitr)
+library(ymlthis)
+library(xaringanExtra)
+
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, 
+                      echo = TRUE, cache = FALSE, 
+                      eval = FALSE, 
+                      fig.align = 'center')
+# options(knitr.table.format = "html")
+library(tidyverse)
+library(RefManageR)
+library(kableExtra)
+library(formattable)
+bibs <- ReadBib("references.bib", check = FALSE)
+xaringanExtra::use_panelset()
+xaringanExtra::use_share_again()
+
+```
+
+layout: true
+  
+<div class="my-footer"><span>https://github.com/brunaw/reg-rf-demo</span></div>
+
+<!-- this adds the link footer to all slides, depends on my-footer class in css-->
+
+---
+name: bookdown-title
+
+<br>
+<br>
+
+.pull-left[
+<div class="column">
+<img src="img/MU_logo.png" width="350">
+</div>
+]
+
+
+<br>
+<br>
+<br>
+<br>
+
+<br>
+<br>
+<br>
+<br>
+<br>
+
+### .fancy[Feature Selection via Gain Penalization in Random Forests]
+
+.large[Bruna Wundervald | Maynooth University | V SER, June 2021]
+
+```{css, echo=FALSE}
+.panelset {
+  --panel-tab-font-family: Work Sans;
+  --panel-tab-background-color-active: #fffbe0;
+  --panel-tab-border-color-active: #023d4d;
+}
+.panelset .panel-tabs .panel-tab > a {
+	color: #023d4d;
+}
+```
+
+---
+class: inverse, middle
+
+### .fancy[Summary]
+
+  - Introduction
+    - Random Forests
+    - Gain Penalization
+    - Feature Selection
+  
+  - Implementation: `R` code
+    - Data
+    - First models
+    - Feature selection
+    - Final model
+
+---
+class: inverse, middle, center
+
+### .fancy[Introduction]
+
+  
+---
+# Introduction
+
+- Oftentimes, we want to estimate machine learning models that use
+just a few of the available predictors 
+
+- Random Forests are a form of tree-based ensembles
+
+- Grows many trees in resamples of the data, averaging the results
+at the end (bagged ensemble) (`r Citet(bibs[key = "Breiman1996"])`): 
+
+
+$$\hat f(\mathbf{x}) = \sum_{n = 1}^{N_{tree}} \frac{1}{N_{tree}} \hat f_n(\mathbf{x}),$$
+
+where $\hat f_n$ corresponds to the $n$-th tree
+
+## Issues
+
+- Use all or most of the features that are feed to them
+ 
+- Struggle a lot to detect highly correlated features (`r Citet(bibs[key = "phdthesisRF"])`)
+
+
+
+---
+
+# Gain penalization
+
+- A tree-gain weighting method (`r Citet(bibs[key = "rrf_paper"])`)
+- When determining the next child node to be added to a decision tree, 
+the gain (or the error reduction) of each feature 
+is multiplied by a penalization parameter:  
+
+$$\begin{equation} \text{Gain}_{R}(\mathbf{X}_{i}, t) = 
+\begin{cases} \lambda \Delta(i, t), \thinspace  i \notin \mathbb{U} \text{ and} \\ \Delta(i, t), \thinspace  i \in \mathbb{U},  \end{cases}
+\label{eq:grrf}\end{equation}$$
+
+where $\mathbb{U}$ is the set of indices of the features previously 
+used in the tree, $\mathbf{X}_{i}$ is the candidate feature,
+$t$ is the candidate splitting point and $\lambda \in (0, 1]$  
+
+
+> A new split will only be made if, after the penalization,
+the gain of adding this node is still higher than having 
+no new child node in the tree
+
+---
+
+# Generalizing gain penalization
+
+
+- In (`r Citet(bibs[key = "wundervald2020generalizing"])`), we proposed 
+a generalization to the way the penalization coefficients
+are calculated, such that we can have full control over it. 
+
+
+- Our $\lambda_i$ is written as 
+$$\begin{equation}
+\lambda_i = (1 - \gamma) \lambda_0 + \gamma g(\mathbf{x}_i), \label{eq:generalization} \end{equation}$$
+
+where $\lambda_0 \in [0, 1)$ is interpreted as the 
+baseline penalization,  $g(\mathbf{x}_i)$ 
+is a function of the  $i$-th feature, 
+and $\gamma \in [0, 1)$ is their mixture parameter, 
+with $\lambda_i \in [0, 1)$. 
+
+
+- $g(\mathbf{x}_i)$  should represent relevant information about the 
+features, based on some characteristic of interest
+
+- Inspiration on the use of priors made in Bayesian methods
+
+- Global-local penalization
+
+---
+--- 
+# Feature Selection
+
+The full feature selection procedure happens in 3 main steps:
+
+  1. Running a bunch of penalized random forests models
+  with different hyperparameters and record their accuracies and final set of features
+  
+  2. For each training dataset, select the top-n (for this post we use n = 3) fitted models in terms of the accuracies, and run a "new" random
+  forest for each of the feature sets used by them. This is done using all
+  of the training sets so we can evaluate how these features perform in slightly different scenarios
+  
+  3. Finally, get the top-m set of models (here m = 30) from these
+  new ones, check which features were the most used between them 
+  and run a final random forest model with this feature set.
+  
+  - Here we select only the 15 most used features from the top 30 models
+
+---
+
+class: inverse, middle, center
+
+### .fancy[Implementation]
+
+---
+# Data 
+
+- `gravier` dataset 
+  (`r Citet(bibs[key = "gravier2010prognostic"])`)
+- Goal: to predict whether 168 breast cancer patients had a diagnosis
+labelled "poor" (~66%) or "good" (~33%), with 2905 predictors available
+- `tidyverse` + `tidymodels`
+  
+
+.panelset[
+.panel[.panel-name[Data]
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(infotheo) # For the mutual information function
+set.seed(2021)
+
+# Loading data and creating a 5-fold CV object
+data('gravier', package = 'datamicroarray')
+
+gravier <- data.frame(class = gravier$y, gravier$x)
+folds <- rsample::vfold_cv(gravier, v = 5) %>% 
+  dplyr::mutate(train =  map(splits, training),
+                test  = map(splits, testing))
+```
+]]
+
+
+---
+# Modelling functions
+
+> `c++` implementantion at https://github.com/imbs-hl/ranger
+
+.panelset[
+.panel[.panel-name[Modelling]
+
+```{r}
+# A function that runs the penalized random forests models 
+modelling <- function(train, reg_factor = 1, mtry = 1){
+  rf_mod <- 
+    rand_forest(trees = 500, mtry = (mtry * ncol(train)) - 1) %>% 
+    set_engine("ranger", importance = "impurity", 
+               regularization.factor = reg_factor) %>% 
+    set_mode("classification") %>% 
+    parsnip::fit(class ~ ., data = train)
+  return(rf_mod)
+}
+```
+]
+
+.panel[.panel-name[Penalization]
+
+```{r}
+# A function that receives the mixing parameters
+# and calculates lambda_i with the chose g(x_i)
+penalization <- function(gamma, lambda_0, data = NULL, imps = NULL, type = "rf"){
+  if(type == "rf"){
+    # Calculating the normalized importance values 
+    imps <- imps/max(imps)
+    imp_mixing <- (1 - gamma) * lambda_0 + imps * gamma 
+    return(imp_mixing)
+  } else if(type == "MI"){
+    mi <- function(data, var) mutinformation(c(data$class), data %>% pull(var))
+    # Calculating the normalized mutual information values
+    disc_data  <- infotheo::discretize(data) 
+    disc_data$class <- as.factor(data$class)
+    names_data <- names(data)[-1]
+    mi_vars <- names_data  %>% map_dbl(~{mi(data = disc_data, var = .x) })
+    mi_mixing <- (1 - gamma) * lambda_0 + gamma * (mi_vars/max(mi_vars))
+    return(mi_mixing)  
+  }}
+```
+]
+
+.panel[.panel-name[Hyperparameters]
+
+```{r}
+# Setting all hyperparameters ---
+mtry <-  tibble(mtry = c(0.20, 0.45, 0.85))  
+gamma_f  <-  c(0.3, 0.5, 0.8)
+lambda_0_f <- c(0.35, 0.75)
+
+parameters <- mtry %>% tidyr::crossing(lambda_0_f, gamma_f)
+# Adds gamma_f and lambda_0_f and run the functions with them ------
+folds_imp <- folds %>% 
+  dplyr::mutate(
+    # Run the standard random forest model for the 5 folds
+    model = purrr::map(train, modelling), 
+    importances_std = purrr::map(model, ~{.x$fit$variable.importance}))  %>%
+  tidyr::expand_grid(parameters) %>% 
+  dplyr::mutate(imp_rf = purrr::pmap(
+    list(gamma_f, lambda_0_f, train, importances_std), type = "rf", penalization), 
+    imp_mi = purrr::pmap(
+      list(gamma_f, lambda_0_f, train, importances_std), type = "MI", penalization)) 
+```
+]
+
+
+]
+
+---
+class: middle
+
+## Looking at the accuracy of the standard random forest 
+
+```{r, echo = FALSE, eval = TRUE}
+metric_std_rf <- readRDS("results/metric_std_rf.rds")
+metric_std_rf %>% 
+  knitr::kable(escape = FALSE, format = 'html') %>%
+  kable_styling(bootstrap_options = c("condensed", "hover"), 
+                full_width = FALSE)
+```
+
+
+---
+# Running models
+
+.panelset[
+.panel[.panel-name[All models]
+
+```{r}
+run_all_models <-  folds_imp %>%   
+  dplyr::select(id, model, train, test,  imp_rf, imp_mi, mtry, lambda_0_f, gamma_f) %>% 
+  tidyr::gather(type, importance, -train, -test, -mtry,-id, -model, -lambda_0_f, -gamma_f) %>% 
+  dplyr::mutate(fit_penalized_rf = purrr::pmap(list(train, importance, mtry), modelling)) 
+
+```
+]
+
+.panel[.panel-name[Metrics]
+
+```{r}
+results <- run_all_models %>% 
+  dplyr::mutate(
+    model_importance = purrr::map(fit_penalized_rf, ~{.x$fit$variable.importance}),
+    n_var = purrr::map_dbl(model_importance, n_vars),
+    accuracy = 1 - purrr::map_dbl(fit_penalized_rf, ~{ .x$fit$prediction.error}),
+    accuracy_test = purrr::map2_dbl(
+      .x = fit_penalized_rf, .y = test, ~{ acc_test(.x, .y)})) 
+```
+]
+
+.panel[.panel-name[First Results]
+
+```{r, echo = FALSE, eval = TRUE}
+results_table <- readRDS("results/results_table.rds")
+results_table %>% 
+  dplyr::arrange(id, desc(accuracy_test), desc(accuracy), n_var) %>% 
+  dplyr::slice(1:5) %>% 
+  knitr::kable(escape = FALSE, format = 'html') %>%
+  kable_styling(bootstrap_options = c("condensed", "hover"), 
+                full_width = FALSE)
+```
+
+
+]]
+
+---
+```{r, echo = FALSE, fig.cap="Test accuracies for each combination of mtry, type of $g(\\mathbf{x}_i)$, and $\\gamma$.", fig.width=14, fig.height=7, eval = TRUE}
+p1 <- results_table %>% 
+  ggplot(aes(y = accuracy_test, x = factor(mtry))) +
+  facet_wrap(~type + gamma_f, 
+             labeller= label_bquote(gamma~"="~.(gamma_f)~", g("~x[i]~") ="~.(type))) +
+  geom_boxplot(fill = "#e68c7c") +
+  labs(y = "Test accuracy", x = "mtry (%)") +
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 8)) +
+  theme_bw(18)
+
+p1 
+```
+
+---
+
+
+```{r, echo = FALSE, fig.cap="Final number of variables used for each combination of mtry, type of $g(\\mathbf{x}_i)$, and $\\gamma$", fig.width=14, fig.height=7, eval = TRUE}
+p2 <- results_table %>% 
+  ggplot(aes(y = n_var, x = factor(mtry))) +
+  facet_wrap(~type + gamma_f, 
+             labeller= label_bquote(gamma~"="~.(gamma_f)~", g("~x[i]~") ="~.(type))) +
+  geom_boxplot(fill = "#e68c7c") +
+  labs(y = "Number of variables used", x = "mtry (%)") +
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 8)) +
+  theme_bw(18)
+
+p2
+```
+
+
+---
+
+--- 
+
+# Feature selection
+
+
+
+.panelset[
+.panel[.panel-name[Selecting best models & running again]
+
+```{r}
+best_models <- results %>% 
+  arrange(desc(accuracy_test), desc(accuracy), n_var) %>% 
+  group_by(id) %>% 
+  slice(1:3) %>% 
+  ungroup() %>% 
+  mutate(new_formula = map(model_importance, get_formula))
+
+# Re-evaluating selected variables -----------------
+reev <- tibble(forms = best_models$new_formula) %>% 
+  tidyr::expand_grid(folds) %>% 
+  dplyr::mutate(reev_models = purrr::map2(train, forms, modelling_reev))
+
+results_reev <- reev %>% 
+  dplyr::mutate(feat_importance = purrr::map(reev_models, ~{.x$fit$variable.importance}),
+                n_var = purrr::map_dbl(feat_importance, n_vars),
+                accuracy = 1 - purrr::map_dbl(reev_models, ~{ .x$fit$prediction.error}),
+                accuracy_test = purrr::map2_dbl(.x = reev_models, .y = test, ~{ acc_test(.x, test = .y)})) 
+```
+]
+
+.panel[.panel-name[Results]
+
+```{r, eval = TRUE, echo = FALSE}
+results_reev <-  read_rds("results/results_reev.rds")
+results_reev %>% 
+  select(id, n_var, accuracy, accuracy_test) %>% 
+  arrange(id, desc(accuracy_test), desc(accuracy), n_var) %>% 
+  slice(1:5) %>% 
+  knitr::kable(escape = FALSE, format = 'html') %>%
+  kable_styling(bootstrap_options = c("condensed", "hover"), 
+                full_width = FALSE)
+```
+]
+
+
+]
+
+
+---
+
+# Final models 
+
+
+
+.panelset[
+.panel[.panel-name[Final predictors]
+
+```{r}
+selected_vars <- results_reev %>% 
+  arrange(desc(accuracy_test), desc(accuracy), n_var) %>% 
+  slice(1:30) %>% 
+  mutate(ind = 1:n(), vars = map(feat_importance, get_vars)) %>% 
+  dplyr::select(ind, vars) %>% 
+  unnest() %>% 
+  group_by(vars) %>% 
+  summarise(count = n()) %>% 
+  arrange(desc(count))
+
+# Select the final 15 features
+final_vars <- selected_vars %>% slice(1:15) %>% pull(vars)
+# Create the final formula 
+final_form <- paste("class ~ ", paste0(final_vars, collapse = ' + ')) %>%
+  as.formula()
+```
+]
+
+.panel[.panel-name[Final Model]
+
+```{r}
+# Create the 20 new training and test sets
+set.seed(2021)
+folds_20 <- rsample::vfold_cv(gravier, v = 20) %>% 
+  dplyr::mutate(train =  map(splits, training), test  = map(splits, testing))
+
+# Run the final model for the new train-test sets
+final_results <- folds_20$splits %>% map(~{
+  train <-  training(.x)
+  test <-  testing(.x)
+  
+  rf <- rand_forest(trees = 500, mtry = 7) %>%
+    set_engine("ranger", importance = "impurity") %>% 
+    set_mode("classification") %>% 
+    parsnip::fit(final_form, data = train)
+  
+  accuracy_test <- acc_test(rf, test = test)
+  list(accuracy_test = accuracy_test, 
+       accuracy = 1 - rf$fit$prediction.error, 
+       imp = rf$fit$variable.importance)
+})
+```
+]
+
+
+.panel[.panel-name[Results]
+
+```{r, echo = FALSE, eval = TRUE}
+final_results <-  read_rds("results/final_results.rds")
+data.frame(accuracy_test = final_results %>% map_dbl("accuracy_test"), 
+           accuracy = final_results %>% map_dbl("accuracy")) %>% 
+  gather(type, value) %>% 
+  group_by(type) %>% 
+  summarise(mean = mean(value), median = median(value)) %>% 
+  knitr::kable(escape = FALSE, format = 'html') %>%
+  kable_styling(bootstrap_options = c("condensed", "hover"), 
+                full_width = FALSE)
+```
+]]
+
+---
+class: middle
+
+```{r, echo = FALSE, fig.cap="Average importance values for the final selected variables", fig.width=7, fig.height=7, eval = TRUE}
+final_results %>% 
+  map("imp") %>% 
+  bind_rows() %>% 
+  gather(vars, value) %>% 
+  group_by(vars) %>% 
+  summarise(value = mean(value)) %>% 
+  arrange(desc(value)) %>% 
+  ggplot(aes(x = reorder(vars, value), value)) +
+  geom_linerange(
+    aes(ymin = min(value), ymax = value),
+    position = position_dodge(width = 0.5), size = 1.5, 
+    colour = 'wheat1') + 
+  geom_point(colour = "#f5c04a", size = 3) + 
+  ylab("Average importance values") +
+  xlab("Variables") +
+  theme_bw(18) +
+  coord_flip() 
+```
+
+---
+
+class: inverse, middle, center
+
+### .fancy[Conclusions]
+
+---
+
+# Conclusions
+
+- Our gain penalization method can be very useful to select 
+features for random forests 
+
+- In the example, 
+the final test accuracy (average) is higher than what
+was seen in the previous plots, but now using only 15 features
+
+- These results are better than what was previously observed in the
+literature for this data  (`r Citet(bibs[key = c("huynh2020improvements", "lopez2018double", "takada2018independently")])`)
+
+
+
+Links:
+  - [To paper](https://ieeexplore.ieee.org/document/9229097)
+  - [To full code](https://github.com/brunaw/reg-rf-demo/tree/master/code)
+  - [To presentation repository](https://github.com/brunaw/reg-rf-demo/tree/master/presentation)
+  
+
+---
+ 
+# References
+
+
+```{r, echo = FALSE, eval = TRUE, results='asis'}
+print(bibs[key = c("wundervald2020generalizing",
+                   "gravier2010prognostic",
+                   "Breiman1996", 
+                   "rrf_paper",
+                   "phdthesisRF")], 
+      .opts = list(check.entries = FALSE, 
+                   style = "html", 
+                   bib.style = "authoryear"))
+```
+
+
+
+---
+
+
+class: middle, center, inverse
+
+<font size="80">Thanks! </font>
+
+<b> 
+<font size="80">http://brunaw.com/ </font>
+
+<p>
+
+
+ 
